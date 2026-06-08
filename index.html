@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Клетки — игра онлайн</title>
+<style>
+  :root {
+    --gold:      #D4A030;
+    --gold-glow: rgba(212,160,48,.5);
+    --dark-wood: #2C1608;
+    --text-warm: #F0D898;
+    --panel-bg:  rgba(28, 14, 4, 0.72);
+    --panel-bd:  rgba(212,160,48,.28);
+    /* Соответствуют константам в game.js: SZ=620, MG=40, CS=54 */
+    --board-size: 620px;
+    --board-margin: 40px;
+    --cell-size: 54px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; min-height:100vh; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--text-warm);
+    background-color: #2C1608;
+    background-image:
+      repeating-linear-gradient(88deg, transparent 0, transparent 55px,
+        rgba(0,0,0,.06) 55px, rgba(0,0,0,.06) 56px),
+      repeating-linear-gradient(2deg,  transparent 0, transparent 80px,
+        rgba(0,0,0,.04) 80px, rgba(0,0,0,.04) 81px),
+      radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,.5) 90%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 12px 32px;
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: clamp(22px, 4vw, 34px);
+    letter-spacing: 4px;
+    color: var(--gold);
+    text-shadow: 0 2px 6px rgba(0,0,0,.6), 0 0 14px var(--gold-glow);
+    text-transform: uppercase;
+  }
+  .subtitle {
+    margin: 0 0 18px;
+    font-size: clamp(11px, 2.5vw, 13px);
+    letter-spacing: 2px;
+    color: rgba(240,216,152,.7);
+    text-transform: uppercase;
+  }
+
+  .layout {
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+    max-width: 1100px;
+  }
+
+  /* ── Стек: бар-сверху / доска / бар-снизу ──────────────────────── */
+  .board-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: var(--board-size);
+  }
+
+  /* Горизонтальный бар — 10 ячеек, выровненных по столбцам доски */
+  .bar {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 0;
+    /* Ширина бара = ширина игрового поля (без рамки доски). */
+    width: calc(100% - 2 * (var(--board-margin) / var(--board-size) * 100%));
+    margin: 0 auto;
+    background: linear-gradient(180deg, rgba(28,14,4,.85), rgba(48,24,8,.65));
+    border: 1px solid var(--panel-bd);
+    border-radius: 8px;
+    box-shadow: inset 0 0 10px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+    padding: 4px;
+    min-height: 44px;
+    position: relative;
+  }
+  .bar.top    { margin-bottom: 6px; }
+  .bar.bottom { margin-top: 6px; }
+  .bar::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translate(-110%, -50%);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: rgba(240,216,152,.55);
+    text-transform: uppercase;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .bar-slot {
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    min-height: 32px;
+  }
+  .bar-piece {
+    width: 76%;
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    border: 1.5px solid rgba(0,0,0,.6);
+    box-shadow: inset 0 -2px 4px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
+  }
+  .bar-piece.w { background: radial-gradient(circle at 35% 30%, #F4E0B6 0%, #B58A56 80%); }
+  .bar-piece.b { background: radial-gradient(circle at 35% 30%, #3A2818 0%, #050300 80%); }
+  .bar-piece.usable {
+    box-shadow: inset 0 -2px 4px rgba(0,0,0,.4), 0 0 10px var(--gold-glow), 0 0 0 2px var(--gold);
+    cursor: pointer;
+    animation: barPulse 1.4s ease-in-out infinite;
+  }
+  .bar-piece.selected {
+    box-shadow:
+      inset 0 -2px 4px rgba(0,0,0,.4),
+      0 0 16px rgba(255,210,40,.95),
+      0 0 0 3px #FFD428;
+    transform: scale(1.12);
+    animation: none;
+  }
+  @keyframes barPulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.08); }
+  }
+  .bar-count {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    font-size: 9px;
+    color: var(--gold);
+    background: rgba(0,0,0,.7);
+    border-radius: 7px;
+    padding: 1px 4px;
+    line-height: 1;
+    font-weight: bold;
+  }
+
+  /* Доска */
+  .board-wrap {
+    position: relative;
+    width: 100%;
+    max-width: var(--board-size);
+  }
+  canvas#board {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    box-shadow:
+      0 8px 24px rgba(0,0,0,.55),
+      0 0 0 1px rgba(0,0,0,.5),
+      inset 0 0 0 1px rgba(212,160,48,.08);
+    touch-action: none;
+    background: #2C1608;
+  }
+
+  /* Правая панель */
+  .panel {
+    width: 270px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-bd);
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: inset 0 0 12px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.4);
+  }
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--gold);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .status {
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text-warm);
+    min-height: 40px;
+  }
+  .status .who {
+    color: var(--gold);
+    font-weight: bold;
+  }
+
+  /* Кубики */
+  .dice-row {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin: 6px 0 14px;
+  }
+  .die {
+    width: 56px; height: 56px;
+    border-radius: 11px;
+    background: linear-gradient(150deg, #f3ebd6 0%, #d8c598 100%);
+    box-shadow:
+      inset 0 -3px 6px rgba(0,0,0,.18),
+      inset 0 3px 4px rgba(255,255,255,.55),
+      0 4px 10px rgba(0,0,0,.5),
+      0 0 0 1px rgba(0,0,0,.35);
+    position: relative;
+    transition: transform .25s ease;
+  }
+  .die.rolling { animation: tumble .55s ease; }
+  .die.used {
+    opacity: .35;
+    filter: grayscale(.5);
+  }
+  .die.active {
+    box-shadow:
+      inset 0 -3px 6px rgba(0,0,0,.18),
+      inset 0 3px 4px rgba(255,255,255,.55),
+      0 4px 10px rgba(0,0,0,.5),
+      0 0 0 2px var(--gold),
+      0 0 14px var(--gold-glow);
+  }
+  .pip {
+    position: absolute;
+    width: 9px; height: 9px;
+    background: #1a0d04;
+    border-radius: 50%;
+    box-shadow: inset 0 1px 1px rgba(255,255,255,.18);
+  }
+  @keyframes tumble {
+    0%   { transform: rotate(0)    scale(1); }
+    35%  { transform: rotate(180deg) scale(1.08); }
+    70%  { transform: rotate(330deg) scale(.95); }
+    100% { transform: rotate(360deg) scale(1); }
+  }
+
+  .btn {
+    appearance: none;
+    border: 1px solid var(--gold);
+    background: linear-gradient(180deg, #4a2a10 0%, #2c1608 100%);
+    color: var(--gold);
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all .2s ease;
+    width: 100%;
+  }
+  .btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #5e3614 0%, #36190a 100%);
+    box-shadow: 0 0 14px var(--gold-glow);
+    color: #fff5d6;
+  }
+  .btn:disabled { opacity: .35; cursor: not-allowed; }
+  .btn.secondary {
+    border-color: rgba(212,160,48,.4);
+    color: rgba(240,216,152,.7);
+  }
+
+  .legend {
+    font-size: 12px;
+    line-height: 1.55;
+    color: rgba(240,216,152,.78);
+  }
+  .legend b { color: var(--gold); }
+  .legend .row { display: flex; gap: 8px; margin: 4px 0; align-items: flex-start; }
+  .legend .dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+  .legend .dot.move { background: rgba(60,200,60,.85); border: 1px solid rgba(255,255,255,.6); }
+  .legend .dot.cap  { background: rgba(220,60,40,.85); border: 1px solid rgba(255,255,255,.6); }
+  .legend .dot.sel  { background: rgba(240,200,40,.85); border: 1px solid rgba(255,255,255,.6); }
+
+  .score {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+  .score .me   { color: #f4e0b6; }
+  .score .ai   { color: #d8b8a0; }
+  .score .num  { font-size: 18px; font-weight: bold; color: var(--gold); }
+
+  /* Оверлей конца игры */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    backdrop-filter: blur(6px);
+    padding: 16px;
+  }
+  .overlay.hidden { display: none; }
+  .modal {
+    background: linear-gradient(180deg, #3a1f0c 0%, #1d0e04 100%);
+    border: 1.5px solid var(--gold);
+    box-shadow: 0 0 40px var(--gold-glow), 0 12px 40px rgba(0,0,0,.7);
+    border-radius: 14px;
+    padding: 28px 30px;
+    text-align: center;
+    min-width: 280px;
+    max-width: 90vw;
+  }
+  .modal h2 {
+    margin: 0 0 6px;
+    color: var(--gold);
+    font-size: 26px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .modal p { margin: 0 0 18px; color: var(--text-warm); }
+
+  .settings-modal-content {
+    text-align: left;
+    min-width: 320px;
+  }
+  .settings-modal-content h2 { text-align: center; }
+
+  /* Модалка правил */
+  .rules-modal-content {
+    text-align: left;
+    width: 560px;
+    max-width: 92vw;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .rules-modal-content h2 { text-align: center; margin-bottom: 14px; }
+  .rules-body {
+    overflow-y: auto;
+    padding-right: 6px;
+    margin-bottom: 14px;
+    color: var(--text-warm);
+  }
+  .rules-body h4 {
+    margin: 14px 0 4px;
+    color: var(--gold);
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .rules-body h4:first-child { margin-top: 0; }
+  .rules-body p {
+    margin: 0 0 4px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: rgba(240,216,152,.88);
+  }
+  .rules-body b { color: var(--gold); }
+  .rules-body .sw {
+    display: inline-block;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 4px;
+    border: 1px solid rgba(255,255,255,.4);
+  }
+  .rules-body .sw.move  { background: rgba(60,200,60,.85); }
+  .rules-body .sw.merge { background: rgba(212,160,48,.95); }
+  .rules-body .sw.cap   { background: rgba(255,80,60,.95); }
+  /* красивый скроллбар */
+  .rules-body::-webkit-scrollbar { width: 6px; }
+  .rules-body::-webkit-scrollbar-track { background: rgba(0,0,0,.3); border-radius: 3px; }
+  .rules-body::-webkit-scrollbar-thumb { background: rgba(212,160,48,.5); border-radius: 3px; }
+  .rules-body::-webkit-scrollbar-thumb:hover { background: rgba(212,160,48,.8); }
+  .opt-group { margin-bottom: 14px; }
+  .opt-group label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: var(--gold);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .opt-row { display: flex; gap: 8px; }
+  .opt-btn {
+    flex: 1;
+    padding: 9px 8px;
+    border: 1px solid rgba(212,160,48,.35);
+    background: transparent;
+    color: var(--text-warm);
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .opt-btn.active {
+    background: var(--gold);
+    color: #1a0d04;
+    border-color: var(--gold);
+    font-weight: 600;
+  }
+  .opt-btn:hover:not(.active) { background: rgba(212,160,48,.12); }
+
+  /* ── Адаптация: планшет/малый десктоп ───────────────────────────── */
+  @media (max-width: 980px) {
+    .layout {
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    .panel {
+      width: 100%;
+      max-width: var(--board-size);
+    }
+  }
+
+  /* ── Мобильный ──────────────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    body { padding: 10px 6px 24px; }
+    h1   { font-size: 24px; letter-spacing: 3px; }
+    .subtitle { margin-bottom: 10px; }
+
+    .bar { min-height: 34px; padding: 3px; }
+    .bar::before { display: none; } /* убираем подпись слева — не помещается */
+
+    .panel { gap: 10px; }
+    .card  { padding: 10px 12px; }
+    .card h3 { font-size: 10px; }
+    .status { font-size: 13px; min-height: 32px; }
+
+    .die { width: 48px; height: 48px; border-radius: 9px; }
+    .pip { width: 7px; height: 7px; }
+
+    .btn { padding: 12px 10px; font-size: 12px; }
+
+    .legend { font-size: 11.5px; }
+    .modal  { padding: 22px 20px; }
+    .modal h2 { font-size: 22px; letter-spacing: 2px; }
+  }
+
+  /* Очень узкий экран */
+  @media (max-width: 380px) {
+    .die { width: 42px; height: 42px; }
+    .pip { width: 6px; height: 6px; }
+  }
+
+  /* ── Главный экран ──────────────────────────────────────────────── */
+  .menu-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 70vh;
+    width: 100%;
+    max-width: 480px;
+    gap: 14px;
+  }
+  .menu-screen.hidden { display: none; }
+  .menu-screen h2 {
+    margin: 0 0 8px;
+    color: var(--gold);
+    font-size: 16px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  .menu-card {
+    width: 100%;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-bd);
+    border-radius: 12px;
+    padding: 22px 22px 18px;
+    box-shadow: inset 0 0 14px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.5);
+  }
+  .menu-card h3 {
+    margin: 0 0 6px;
+    color: var(--gold);
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .menu-card p {
+    margin: 0 0 14px;
+    color: rgba(240,216,152,.78);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .menu-card .btn { margin-top: 4px; }
+  .menu-card .btn + .btn { margin-top: 8px; }
+  .invite-link-box {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .invite-link-box input {
+    flex: 1;
+    background: rgba(0,0,0,.5);
+    border: 1px solid var(--panel-bd);
+    color: var(--text-warm);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 9px 10px;
+    border-radius: 5px;
+    min-width: 0;
+  }
+  .invite-link-box .btn {
+    width: auto;
+    padding: 9px 14px;
+    margin: 0;
+    flex-shrink: 0;
+  }
+  .invite-status {
+    margin-top: 10px;
+    font-size: 12px;
+    color: rgba(240,216,152,.7);
+    text-align: center;
+  }
+  .invite-status.ok { color: #7dd47d; }
+  .invite-status.err { color: #ff8060; }
+
+  /* ── Чат ────────────────────────────────────────────────────────── */
+  .chat-card { display: flex; flex-direction: column; }
+  .chat-log {
+    height: 140px;
+    overflow-y: auto;
+    padding: 6px 6px 6px 4px;
+    background: rgba(0,0,0,.4);
+    border: 1px solid rgba(212,160,48,.18);
+    border-radius: 5px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+  .chat-log::-webkit-scrollbar { width: 5px; }
+  .chat-log::-webkit-scrollbar-thumb { background: rgba(212,160,48,.4); border-radius: 3px; }
+  .chat-msg { margin: 0 0 4px; padding: 3px 6px; border-radius: 4px; }
+  .chat-msg .nick { font-weight: bold; color: var(--gold); margin-right: 4px; }
+  .chat-msg.system { font-style: italic; color: rgba(240,216,152,.55); font-size: 11.5px; }
+  .chat-input-row { display: flex; gap: 6px; }
+  .chat-input-row input {
+    flex: 1;
+    background: rgba(0,0,0,.5);
+    border: 1px solid var(--panel-bd);
+    color: var(--text-warm);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 7px 9px;
+    border-radius: 5px;
+    min-width: 0;
+  }
+  .chat-input-row .btn { width: auto; padding: 7px 12px; margin: 0; flex-shrink: 0; font-size: 11px; }
+
+  /* ── Бейдж онлайна ──────────────────────────────────────────────── */
+  .connection-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(240,216,152,.7);
+    padding: 3px 9px;
+    border-radius: 99px;
+    background: rgba(0,0,0,.4);
+    border: 1px solid rgba(212,160,48,.25);
+  }
+  .connection-pill .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #888;
+  }
+  .connection-pill.online .dot { background: #7dd47d; box-shadow: 0 0 6px #7dd47d; }
+  .connection-pill.waiting .dot { background: #d4a030; animation: pulse 1.2s ease-in-out infinite; }
+  .connection-pill.offline .dot { background: #ff6040; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; } 50% { opacity: .4; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Клетки</h1>
+<div class="subtitle">шашки на кубиках</div>
+
+<!-- ── ГЛАВНЫЙ ЭКРАН ──────────────────────────────────────── -->
+<div class="menu-screen" id="menuScreen">
+  <h2>Выбор режима</h2>
+
+  <div class="menu-card">
+    <h3>🤖 Против ИИ</h3>
+    <p>Сыграйте партию против компьютера. Три уровня сложности.</p>
+    <button class="btn" id="playAiBtn">Играть с ИИ</button>
+  </div>
+
+  <div class="menu-card">
+    <h3>👥 Онлайн с другом</h3>
+    <p>Создайте комнату — получите ссылку и отправьте другу. Кто перейдёт первым — будет играть за чёрных.</p>
+    <button class="btn" id="createRoomBtn">Создать комнату</button>
+    <div class="invite-link-box" id="inviteBox" style="display:none;">
+      <input type="text" id="inviteLink" readonly />
+      <button class="btn" id="copyLinkBtn">Копировать</button>
+    </div>
+    <div class="invite-status" id="inviteStatus"></div>
+  </div>
+</div>
+
+<!-- ── ИГРОВОЙ ЭКРАН ──────────────────────────────────────── -->
+<div class="layout" id="gameScreen" style="display:none;">
+  <div class="board-stack">
+    <!-- Бар сверху — выбитые ЧЁРНЫЕ (соперник) -->
+    <div class="bar top" id="barTop" data-label="Бар соперника"></div>
+
+    <div class="board-wrap">
+      <canvas id="board" width="620" height="620"></canvas>
+    </div>
+
+    <!-- Бар снизу — выбитые БЕЛЫЕ -->
+    <div class="bar bottom" id="barBottom" data-label="Ваш бар"></div>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <h3>Статус</h3>
+      <div class="status" id="status">Бросьте кубики</div>
+    </div>
+
+    <div class="card">
+      <h3>Кубики</h3>
+      <div class="dice-row" id="diceRow">
+        <div class="die" id="die1"></div>
+        <div class="die" id="die2"></div>
+      </div>
+      <button class="btn" id="rollBtn">Бросить кубики</button>
+      <button class="btn secondary" id="passBtn" style="margin-top:8px;" disabled>Пропустить ход</button>
+    </div>
+
+    <div class="card" id="connCard" style="display:none;">
+      <h3>Соединение</h3>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span class="connection-pill waiting" id="connPill"><span class="dot"></span><span id="connText">подключение…</span></span>
+        <span style="font-size:11px; color:rgba(240,216,152,.6);" id="roomCodeBadge"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Счёт</h3>
+      <div class="score">
+        <span class="me" id="scoreLblW">Игрок (белые)</span>
+        <span class="num" id="scoreW">0</span>
+      </div>
+      <div class="score" style="margin-top:6px;">
+        <span class="ai"  id="scoreLblB">ИИ (чёрные)</span>
+        <span class="num" id="scoreB">0</span>
+      </div>
+    </div>
+
+    <div class="card chat-card" id="chatCard" style="display:none;">
+      <h3>Чат</h3>
+      <div class="chat-log" id="chatLog"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" maxlength="160" placeholder="Сообщение…" />
+        <button class="btn" id="chatSendBtn">→</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Подсказка</h3>
+      <div class="legend">
+        <div class="row"><span class="dot sel"></span><span>выбранная шашка</span></div>
+        <div class="row"><span class="dot move"></span><span>возможный ход</span></div>
+        <div class="row"><span class="dot cap"></span><span>выбивание шашки</span></div>
+        <div style="margin-top:6px;">
+          <b>Любой кубик</b> можно использовать как ход по вертикали (вперёд) или по горизонтали — на ваш выбор.<br>
+          Выбитая шашка попадает на бар в свою вертикаль и возвращается из неё.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn" id="newGameBtn">Новая игра</button>
+      <button class="btn secondary" id="rulesBtn" style="margin-top:8px;">Правила</button>
+      <button class="btn secondary" id="settingsBtn" style="margin-top:8px;">Настройки</button>
+      <button class="btn secondary" id="backToMenuBtn" style="margin-top:8px;">К меню</button>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay для конца игры -->
+<div class="overlay hidden" id="overlay">
+  <div class="modal">
+    <h2 id="winTitle">Победа</h2>
+    <p id="winSub">Партия завершена</p>
+    <button class="btn" id="restartBtn">Начать заново</button>
+    <button class="btn secondary" id="rematchBtn" style="margin-top:8px; display:none;">Реванш</button>
+    <div id="rematchStatus" style="font-size:12px; color:rgba(240,216,152,.65); margin-top:8px; min-height:14px;"></div>
+  </div>
+</div>
+
+<!-- Overlay для правил -->
+<div class="overlay hidden" id="rulesOverlay">
+  <div class="modal rules-modal-content">
+    <h2>Правила игры</h2>
+    <div class="rules-body">
+      <h4>Цель</h4>
+      <p>Первым перевести все свои шашки на половину соперника. Белые — на строки 1–5, чёрные — на строки 6–10. При этом бар должен быть пуст.</p>
+
+      <h4>Доска</h4>
+      <p>Поле 10×10, играется на всех клетках (светлые и тёмные). По два ряда шашек у каждой стороны — всего по 20.</p>
+
+      <h4>Кубики</h4>
+      <p>Каждый ход — бросок двух кубиков. <b>Любой кубик можно сыграть по вертикали (вперёд) или по горизонтали</b> — это ваш выбор. Кубики можно использовать на одной или разных шашках. При дубле (1:1, 2:2 и т.д.) выпавшее число используется дважды.</p>
+
+      <h4>Ходы</h4>
+      <p>Шашка перемещается ровно на число клеток, выпавшее на кубике. При этом <b>промежуточные клетки не важны</b>: шашка может перепрыгивать через любые другие, важна только конечная клетка. Белые ходят вверх, чёрные — вниз.</p>
+
+      <h4>Усиленная шашка</h4>
+      <p>Если ваша шашка приходит на клетку со своей простой — образуется <b>усиленная шашка</b> (отмечена золотой точкой). На дубле она может ходить парой (тратит оба кубика). Если усиленная делает одиночный ход — на старой клетке остаётся простая.</p>
+
+      <h4>Выбивание</h4>
+      <p>Попав на клетку с чужой простой шашкой, вы её выбиваете — она уходит на <b>бар</b> в ту же вертикаль, где стояла. Усиленную может выбить только другая усиленная.</p>
+
+      <h4>Бар и возврат</h4>
+      <p>Белые выбитые ложатся на нижний бар, чёрные — на верхний, каждая в свою вертикаль. Для возврата используется <b>один кубик</b>: число на нём = расстояние от своего края. Шашка возвращается <b>только в свою вертикаль</b>. Возврат необязателен — можно ходить и другими шашками. При возврате можно выбивать чужую и усиливать свою.</p>
+
+      <h4>Подсказки на доске</h4>
+      <p><span class="sw move"></span> зелёная точка — возможный ход на пустую клетку<br>
+         <span class="sw merge"></span> золотое кольцо — усиление своей шашки<br>
+         <span class="sw cap"></span> красное кольцо — выбивание чужой</p>
+    </div>
+    <button class="btn" id="rulesCloseBtn" style="margin-top:6px;">Закрыть</button>
+  </div>
+</div>
+
+<!-- Overlay для настроек -->
+<div class="overlay hidden" id="settingsOverlay">
+  <div class="modal settings-modal-content">
+    <h2>Настройки</h2>
+    <div class="opt-group">
+      <label>Сложность ИИ</label>
+      <div class="opt-row">
+        <button class="opt-btn" data-diff="easy">Легко</button>
+        <button class="opt-btn active" data-diff="normal">Средне</button>
+        <button class="opt-btn" data-diff="hard">Сложно</button>
+      </div>
+    </div>
+    <div class="opt-group">
+      <label>Кто ходит первым</label>
+      <div class="opt-row">
+        <button class="opt-btn active" data-first="white">Игрок</button>
+        <button class="opt-btn" data-first="black">ИИ</button>
+        <button class="opt-btn" data-first="random">Случайно</button>
+      </div>
+    </div>
+    <button class="btn" id="settingsCloseBtn" style="margin-top:6px;">Применить и закрыть</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
+<script src="./supabase-config.js"></script>
+<script src="./game.js"></script>
+<script src="./online.js"></script>
+</body>
+</html>
