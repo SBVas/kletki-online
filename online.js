@@ -42,6 +42,27 @@
     if (cls) el.classList.add(cls);
   }
 
+  // Карточка «Ссылка для друга» на игровом экране — показываем беломуигроку
+  // от момента создания комнаты до первого броска кубиков.
+  function showGameInvite(link) {
+    const card = $('gameInviteCard');
+    if (!card) return;
+    $('gameInviteLink').value = link;
+    card.style.display = '';
+    setGameInviteStatus('Отправьте ссылку другу и ждите подключения.', '');
+  }
+  function setGameInviteStatus(text, cls) {
+    const el = $('gameInviteStatus');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.remove('ok', 'err');
+    if (cls) el.classList.add(cls);
+  }
+  function hideGameInvite() {
+    const card = $('gameInviteCard');
+    if (card) card.style.display = 'none';
+  }
+
   // Доску НЕ поворачиваем — оба игрока видят одинаковую картинку.
   // Чёрный играет «вверх» (как ИИ в одиночном режиме). Меняем только подписи.
   function applyBoardOrientation() {
@@ -88,6 +109,8 @@
     $('inviteBox').style.display = 'flex';
     setInviteStatus('Комната готова. Отправьте ссылку другу и ждите подключения.', 'ok');
     $('createRoomBtn').disabled = true;
+    // Дублируем ссылку на игровом экране, чтобы она оставалась видной после перехода.
+    showGameInvite(link);
 
     // Подключаемся к каналу и ждём оппонента
     await joinChannel(code);
@@ -136,6 +159,8 @@
         opponentJoined = true;
         setStatusPill('online', 'соперник в игре');
         appendChat({ system: true, text: 'Соперник подключился' });
+        // Не прячем ссылку — просто обновляем текст. Исчезнет после первого броска.
+        setGameInviteStatus('Соперник подключился. Ссылка исчезнет после первого броска кубиков.', 'ok');
 
         // Белый инициирует первый бросок: выбирает кто ходит первым
         if (myColor === WHITE && !window.G) {
@@ -154,10 +179,12 @@
       })
       .on('broadcast', { event: 'dice' }, ({ payload }) => {
         // Принимаем бросок соперника
+        hideGameInvite();
         rollDice(payload.values);
       })
       .on('broadcast', { event: 'move' }, ({ payload }) => {
         // Применяем ход соперника
+        hideGameInvite();
         makeMove(payload.mv, true);
       })
       .on('broadcast', { event: 'pass' }, () => {
@@ -191,8 +218,8 @@
   function startOnlineGame(firstTurn) {
     setOnline({
       myColor,
-      sendMove: (mv) => channel && channel.send({ type: 'broadcast', event: 'move', payload: { mv } }),
-      sendDice: (values) => channel && channel.send({ type: 'broadcast', event: 'dice', payload: { values } }),
+      sendMove: (mv) => { hideGameInvite(); channel && channel.send({ type: 'broadcast', event: 'move', payload: { mv } }); },
+      sendDice: (values) => { hideGameInvite(); channel && channel.send({ type: 'broadcast', event: 'dice', payload: { values } }); },
       sendPass: () => channel && channel.send({ type: 'broadcast', event: 'pass', payload: {} }),
     });
     applyBoardOrientation();
@@ -282,6 +309,7 @@
     $('createRoomBtn').disabled = false;
     $('inviteBox').style.display = 'none';
     setInviteStatus('');
+    hideGameInvite();
     $('chatLog').innerHTML = '';
     showMenu();
   };
@@ -312,17 +340,23 @@
     $('createRoomBtn').addEventListener('click', () => {
       createRoom().catch(e => setInviteStatus('Ошибка: ' + e.message, 'err'));
     });
-    $('copyLinkBtn').addEventListener('click', () => {
-      const inp = $('inviteLink');
-      inp.select();
-      try {
-        navigator.clipboard.writeText(inp.value);
-        $('copyLinkBtn').textContent = 'Скопировано';
-        setTimeout(() => { $('copyLinkBtn').textContent = 'Копировать'; }, 1600);
-      } catch (e) {
-        document.execCommand('copy');
-      }
-    });
+    function bindCopy(btnId, inputId) {
+      const btn = $(btnId);
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const inp = $(inputId);
+        inp.select();
+        try {
+          navigator.clipboard.writeText(inp.value);
+          btn.textContent = 'Скопировано';
+          setTimeout(() => { btn.textContent = 'Копировать'; }, 1600);
+        } catch (e) {
+          document.execCommand('copy');
+        }
+      });
+    }
+    bindCopy('copyLinkBtn', 'inviteLink');
+    bindCopy('gameCopyLinkBtn', 'gameInviteLink');
     $('backToMenuBtn').addEventListener('click', () => {
       if (ONLINE) leaveOnline();
       else showMenu();
