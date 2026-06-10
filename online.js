@@ -28,6 +28,20 @@
   function showGame() {
     $('menuScreen').style.display = 'none';
     $('gameScreen').style.display = 'flex';
+    // В Telegram — показываем BackButton для выхода в меню
+    if (window.TG && window.TG.isInside) {
+      window.TG.showBackButton(() => {
+        if (window.ONLINE) window.leaveOnline && window.leaveOnline();
+        else showMenu();
+      });
+    }
+  }
+  function showMenuFromGame() {
+    if (window.TG && window.TG.isInside) {
+      window.TG.hideBackButton();
+      window.TG.disableClosingConfirmation();
+    }
+    showMenu();
   }
   function setStatusPill(state, text) {
     const pill = $('connPill');
@@ -61,6 +75,7 @@
   function hideGameInvite() {
     const card = $('gameInviteCard');
     if (card) card.style.display = 'none';
+    if (window.TG && window.TG.isInside) window.TG.hideMainButton();
   }
 
   // Доску НЕ поворачиваем — оба игрока видят одинаковую картинку.
@@ -104,13 +119,23 @@
     }
     roomCode = code;
     myColor = WHITE;
-    const link = location.origin + location.pathname + '?room=' + code;
+    // Внутри Telegram — даём ссылку вида t.me/Bot/App?startapp=CODE, иначе обычный ?room=CODE.
+    const link = (window.TG && window.TG.getInviteLink)
+      ? window.TG.getInviteLink(code)
+      : (location.origin + location.pathname + '?room=' + code);
     $('inviteLink').value = link;
     $('inviteBox').style.display = 'flex';
     setInviteStatus('Комната готова. Отправьте ссылку другу и ждите подключения.', 'ok');
     $('createRoomBtn').disabled = true;
     // Дублируем ссылку на игровом экране, чтобы она оставалась видной после перехода.
     showGameInvite(link);
+    // В Telegram — покажем «Поделиться в Telegram» как MainButton
+    if (window.TG && window.TG.isInside) {
+      window.TG.showMainButton('Поделиться ссылкой', () => {
+        window.TG.shareLink(link, 'Сыграем в «Клетки» онлайн?');
+      });
+      window.TG.enableClosingConfirmation();
+    }
 
     // Подключаемся к каналу и ждём оппонента
     await joinChannel(code);
@@ -159,6 +184,7 @@
         opponentJoined = true;
         setStatusPill('online', 'соперник в игре');
         appendChat({ system: true, text: 'Соперник подключился' });
+        if (window.TG) window.TG.haptic('success');
         // Не прячем ссылку — просто обновляем текст. Исчезнет после первого броска.
         setGameInviteStatus('Соперник подключился. Ссылка исчезнет после первого броска кубиков.', 'ok');
 
@@ -311,6 +337,10 @@
     setInviteStatus('');
     hideGameInvite();
     $('chatLog').innerHTML = '';
+    if (window.TG && window.TG.isInside) {
+      window.TG.disableClosingConfirmation();
+      window.TG.hideBackButton();
+    }
     showMenu();
   };
 
@@ -359,7 +389,7 @@
     bindCopy('gameCopyLinkBtn', 'gameInviteLink');
     $('backToMenuBtn').addEventListener('click', () => {
       if (ONLINE) leaveOnline();
-      else showMenu();
+      else showMenuFromGame();
     });
 
     // Чат

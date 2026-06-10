@@ -694,6 +694,7 @@ function rollDice(forcedValues) {
   if (ONLINE && !forcedValues) {
     ONLINE.sendDice([v1, v2]);
   }
+  if (window.TG) window.TG.haptic('medium');
   G.dice = [
     { value: v1, used: false, id: 0 },
     { value: v2, used: false, id: 1 },
@@ -763,6 +764,7 @@ function drawDie(el, val) {
    ──────────────────────────────────────────────────────────────────── */
 function makeMove(mv, fromNetwork) {
   if (ONLINE && !fromNetwork) ONLINE.sendMove(mv);
+  if (window.TG) window.TG.haptic(mv.capture ? 'heavy' : 'light');
   G = { ...G, ...applyMove(G, mv) };
   G.selected = null;
   G.selMoves = [];
@@ -1094,8 +1096,10 @@ function showWinner(clr) {
   let sub;
   if (ONLINE) {
     sub = clr === ONLINE.myColor ? 'Вы выиграли' : 'Соперник выиграл';
+    if (window.TG) window.TG.haptic(clr === ONLINE.myColor ? 'success' : 'error');
   } else {
     sub = clr === WHITE ? 'Все ваши шашки на половине соперника' : 'Все шашки ИИ на вашей половине';
+    if (window.TG) window.TG.haptic(clr === WHITE ? 'success' : 'warning');
   }
   document.getElementById('winSub').textContent = sub;
   document.getElementById('scoreW').textContent = SCORES[WHITE];
